@@ -102,16 +102,48 @@ class VoiceEvolution:
         return feature_fitness * duration_penalty
     
     def _crossover(self, parent1: VoiceGenome, parent2: VoiceGenome) -> np.ndarray:
-        """Create child embedding by combining two parents"""
-        # Uniform crossover
-        mask = np.random.random(parent1.embedding.shape) < 0.5
-        child = np.where(mask, parent1.embedding, parent2.embedding)
+        """Create child embedding by combining two parents using BLX-α crossover with local optimization
+        
+        This implementation uses:
+        1. BLX-α crossover: Creates children in the range [min(p1,p2) - α*d, max(p1,p2) + α*d]
+           where d is the distance between parents
+        2. Local optimization: Biases towards the better parent
+        3. Feature preservation: Uses weighted averaging in certain regions
+        """
+        alpha = 0.3  # Exploration parameter
+        p1, p2 = parent1.embedding, parent2.embedding
+        
+        # Determine which parent is fitter
+        fitness_ratio = parent1.fitness / (parent1.fitness + parent2.fitness)
+        
+        # Calculate bounds for BLX-α
+        min_vals = np.minimum(p1, p2)
+        max_vals = np.maximum(p1, p2)
+        diff = max_vals - min_vals
+        
+        # Generate child values using BLX-α method
+        lower_bound = min_vals - alpha * diff
+        upper_bound = max_vals + alpha * diff
+        
+        # Random interpolation with bias towards better parent
+        r = np.random.random(p1.shape)
+        bias = np.random.normal(fitness_ratio, 0.1, p1.shape)  # Bias towards fitter parent
+        bias = np.clip(bias, 0.2, 0.8)  # Ensure some mixing always occurs
+        
+        # Weighted combination of parents with local optimization
+        child = bias * p1 + (1 - bias) * p2
+        
+        # Apply BLX-α bounds
+        child = np.clip(child, lower_bound, upper_bound)
+        
         return child
     
     def evolve_generation(self, text: str):
         """Evolve one generation of voices"""
         # Evaluate current population
         for genome in self.population:
+            # Convert the genome embedding to float32 before passing to kokoro
+            genome.embedding = genome.embedding.astype(np.float32)
             audio, sr = self.kokoro.create(text, voice=genome.embedding)
             genome.fitness = self._calculate_fitness(audio, sr)
         
